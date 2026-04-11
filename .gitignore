@@ -1,0 +1,24 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Node (just in case)
+node_modules/
+npm-debug.log
+.npm
+
+# Claude Code artifacts (if someone tests gsd inside this repo)
+.planning/
+.claude/
+
+# Temp files
+*.tmp
+*.bak
