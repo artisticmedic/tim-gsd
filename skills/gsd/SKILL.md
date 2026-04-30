@@ -1,12 +1,16 @@
 ---
-description: Get Stuff Done — structured build pipeline with deep interview, requirements traceability, roadmap, per-phase discussion/research/planning/execution, and goal-backward verification. Use when the user says "build", "let's build", "I want to build", "spec this out", "scope this", "deep work", "plan and build", "start a project", "new feature", "get stuff done", "gsd", or activates /gsd with a project idea. Produces structured artifacts (.planning/) that persist across sessions. Supports --auto (fully autonomous) and --chain (interactive discuss, auto plan+execute).
-allowed-tools: Read, Write, Edit, Bash, Glob, Grep, Agent, AskUserQuestion
+description: Structured build pipeline — interview, spec, roadmap, per-phase plan+execute, goal-backward verify. Trigger on /gsd, "build", "let's build", "spec this", "scope this", "new feature", "plan and build". Supports --auto, --chain.
+allowed-tools: Read, Bash, Glob, Grep, Agent, AskUserQuestion
 argument-hint: [idea or description] [--auto] [--chain]
 ---
 
 # Get Stuff Done (gsd)
 
 Structured pipeline with full traceability. Each step produces persistent artifacts so context never gets lost, decisions are never re-asked, and every requirement is tracked from spec to verification.
+
+## Trigger Surface
+
+Invoke when the user says: "build", "let's build", "I want to build", "spec this out", "scope this", "deep work", "plan and build", "start a project", "new feature", "get stuff done", "gsd", or activates /gsd with a project idea. Produces structured artifacts in `.planning/` that persist across sessions. Modes: `--auto` (fully autonomous), `--chain` (interactive discuss, auto plan+execute).
 
 ## This skill includes
 
@@ -21,32 +25,28 @@ Structured pipeline with full traceability. Each step produces persistent artifa
 
 A Node.js CLI at `~/.claude/gsd/gsd-tools.js` handles deterministic state operations reliably. Pure stdlib, zero dependencies, auditable. Use it for STATE.md and config.json reads/writes instead of parsing markdown inline.
 
+**Named builds:** Multiple builds can coexist in `.planning/builds/<slug>/`. Each build is isolated — its own STATE.md, config.json, phases/, etc. Use `--build <name>` to target a specific build. If only one build exists, it auto-selects.
+
 **Common calls:**
 ```bash
-# Compound state query — use this at the start of each phase
-node ~/.claude/gsd/gsd-tools.js init phase <N>
+# List all builds
+node ~/.claude/gsd/gsd-tools.js builds list
 
-# Initialize new project
+# Initialize a new build (creates .planning/builds/<slug>/)
 node ~/.claude/gsd/gsd-tools.js state init "Project Name"
-node ~/.claude/gsd/gsd-tools.js config init
+node ~/.claude/gsd/gsd-tools.js --build project-name config init
+
+# Compound state query — use this at the start of each phase
+node ~/.claude/gsd/gsd-tools.js --build project-name init phase <N>
 
 # Update progress
-node ~/.claude/gsd/gsd-tools.js state update-progress <N> <step> <status>
-# step: discuss | plan | execute | verify
-# status: done | in progress | passed | failed
+node ~/.claude/gsd/gsd-tools.js --build project-name state update-progress <N> <step> <status>
 
 # Create phase directory
-node ~/.claude/gsd/gsd-tools.js phase create <N> "<name>"
-
-# Check phase artifacts
-node ~/.claude/gsd/gsd-tools.js phase status <N>
-
-# Add decisions and log them
-node ~/.claude/gsd/gsd-tools.js state add-decision D-01 "Use session cookies for auth"
+node ~/.claude/gsd/gsd-tools.js --build project-name phase create <N> "<name>"
 
 # Config management
-node ~/.claude/gsd/gsd-tools.js config set granularity coarse
-node ~/.claude/gsd/gsd-tools.js config get workflow.research
+node ~/.claude/gsd/gsd-tools.js --build project-name config set granularity coarse
 ```
 
 Run `node ~/.claude/gsd/gsd-tools.js help` for the full command list.
@@ -55,6 +55,7 @@ Run `node ~/.claude/gsd/gsd-tools.js help` for the full command list.
 - State transitions, config changes, phase directory creation → always use the CLI (reliable, atomic writes)
 - Reading SPEC.md, CONTEXT.md, agent prompts, content generation → inline reads are fine
 - The CLI is for structured data. Content stays in Claude.
+- Always pass `--build <name>` when multiple builds exist in the same directory
 
 ## Flags
 
@@ -66,14 +67,12 @@ Run `node ~/.claude/gsd/gsd-tools.js help` for the full command list.
 
 ### Resume detection
 
-1. Run `node ~/.claude/gsd/gsd-tools.js init overview` to get the full project state in one call. Check `planning_exists`, `state.build`, `state.current_phase`.
+Run `node ~/.claude/gsd/gsd-tools.js init overview` and act on the JSON. It returns existing builds, current phase, and any interrupted discussion checkpoints.
 
-2. If state exists, present: "Found build: [state.build], currently at [state.current_phase]. Resume or start fresh?"
-
-3. Check if `.planning/phases/*/NN-DISCUSS-CHECKPOINT.json` exists. If discussion was interrupted:
-   - "Found interrupted discussion for Phase [N] ({X} of {Y} areas completed). Resume from checkpoint?"
-
-4. If starting fresh, the CLI will create `.planning/` when you call `state init`.
+- Zero builds → fresh start. Run `state init "Name"` to create `.planning/builds/<slug>/`.
+- One build → "Found build: [name], currently at [phase]. Resume or start fresh?"
+- Multiple builds → present via AskUserQuestion, then re-run with `--build <slug>` for the selected one.
+- Interrupted discussion → "Found interrupted discussion for Phase [N] ({X} of {Y} areas completed). Resume from checkpoint?"
 
 ### Brownfield detection
 
@@ -84,7 +83,9 @@ If existing code detected:
 - **Map codebase** (recommended) — Spawn parallel agents to analyze stack, architecture, conventions, concerns. Write to `.planning/CODEBASE.md`.
 - **Skip** — Proceed without mapping.
 
-4. If `$ARGUMENTS` contains an idea, use it as seed. If blank: "What are we building?"
+### Initial input
+
+If `$ARGUMENTS` contains an idea, use it as seed. If blank: "What are we building?"
 
 ---
 
@@ -94,39 +95,48 @@ Read `references/interview-guide.md` before starting.
 
 **Goal:** Extract enough clarity to write a SPEC and define requirements that downstream phases can act on without asking the user again.
 
-**Process:**
+**Read `references/interview-guide.md` for the questioning philosophy and question types.** It's the canonical source — apply it throughout this step. Don't re-derive the principles inline.
 
-1. **Open-ended start.** Let them dump their mental model. Don't interrupt.
+### Pre-written plan detection
 
-2. **Follow energy.** Dig into what excited them. What problem sparked this?
+If `$ARGUMENTS` is a multi-line block with structure (numbered lists, headings, "Phase 1 / Phase 2", or "Implement the following plan:"), the user already did the thinking. Offer:
 
-3. **Challenge vagueness.** Never accept fuzzy answers. "Clean UI" → clean how? "Users" → who specifically? "Simple" → simple to use, build, or maintain?
+> "This looks like a pre-written plan. Skip the interview and use it as SPEC?"
 
-4. **Make abstract concrete.** "Walk me through using this." "What does that look like on screen?" "Give me an example."
+If yes: copy `$ARGUMENTS` verbatim into `.planning/builds/<slug>/SPEC.md` body, populate the frontmatter and Vision sections from context, then jump to Step 3 (Requirements). Don't re-derive what they already wrote.
 
-5. **Surface gray areas proactively.** Based on what they described, identify decisions not yet made. Present them as structured choices via AskUserQuestion. Categorize by domain:
-   - Visual features → layout, density, interactions, empty states
-   - APIs/CLIs → response format, flags, error handling
-   - Content systems → structure, tone, depth, flow
-   - Organization tasks → grouping criteria, naming, exceptions
+### Mode signals
 
-6. **For each gray area:** dig until the answer is specific enough to implement. Use AskUserQuestion with 2-4 concrete options when possible.
+Parse the user's verb at the start of `$ARGUMENTS` to decide where to stop:
 
-7. **Park scope creep.** "Great idea — parking that for later so we stay focused." Track in deferred ideas. Don't lose the idea, don't act on it.
+- **"take a look / scan / look into / audit / check / spec / scope"** → stop after SPEC. Don't proceed to roadmap. Print the SPEC and ask if they want more.
+- **"draft / propose / sketch / mock"** → stop after roadmap. Don't enter the per-phase loop.
+- **"apply / build / do / fix / ship / make it"** → full chain (default).
+- **"plan"** → run through plan-phase for Phase 1, then stop.
 
-8. **Know when to stop.** When you understand WHAT, WHY, WHO, and DONE → offer to proceed.
+If no verb is present, treat as default (full chain).
 
-**Output:** Write `.planning/SPEC.md` using `templates/spec-template.md`.
+### Procedure
 
-After writing, ask:
-- **Continue to requirements** — define v1 scope and build
-- **Just save the spec** — stop here (design briefs, prototype specs)
+1. **Reflect back** for fuzzy or voice-input prompts. "So what I'm hearing is…" — gives the user a chance to correct without feeling interrogated.
+2. **Apply interview-guide.md** to extract WHAT / WHY / WHO / DONE. Follow the thread; don't run a checklist.
+3. **Surface gray areas proactively** in the user's described domain. Present as structured choices via AskUserQuestion (2-4 concrete options each). Categorize by domain (UI / API / content / org).
+4. **Park scope creep.** "Great idea — parking that for later so we stay focused." Track in deferred ideas. Don't lose, don't act.
+5. **Stop when WHAT / WHY / WHO / DONE are locked.** Don't over-interview.
+
+**Output:** Write `.planning/builds/<name>/SPEC.md` using `templates/spec-template.md`.
+
+After writing:
+- If mode signal = stop-after-spec → present SPEC and stop.
+- Otherwise: ask "Continue to requirements, or save the spec and stop?" Honor the answer.
 
 ---
 
 ## Step 2: Config
 
-Ask workflow preferences via AskUserQuestion (2 rounds):
+**If `--auto` is set:** skip the questions. Run `node ~/.claude/gsd/gsd-tools.js --build <slug> config init` — it writes the DEFAULTS (standard granularity, parallel execution, research+plan-check+verification all on). Proceed to research.
+
+**Otherwise**, ask workflow preferences via AskUserQuestion (2 rounds):
 
 **Round 1:**
 1. **Granularity:** Coarse (3-5 phases, recommended for small projects) / Standard (5-8) / Fine (8-12)
@@ -137,7 +147,7 @@ Ask workflow preferences via AskUserQuestion (2 rounds):
 2. **Plan-check:** Verify plans achieve goals before execution? Yes (recommended) / No
 3. **Verification:** Verify outcomes after each phase? Yes (recommended) / No
 
-Store in `.planning/config.json`. Respect throughout the build.
+Store in the build's `config.json` via the CLI. Respect throughout the build.
 
 ---
 
@@ -169,7 +179,7 @@ Store in `.planning/config.json`. Respect throughout the build.
 
 **If --auto:** Auto-include all table stakes, include features from the spec, skip per-category selection.
 
-**Output:** Write `.planning/REQUIREMENTS.md`. Update STATE.md.
+**Output:** Write the build's `REQUIREMENTS.md`. Update STATE.md.
 
 ---
 
@@ -199,6 +209,27 @@ After all 4 complete, spawn a **synthesizer agent:**
 "Read all 4 research files in `.planning/research/`. Create `.planning/research/SUMMARY.md` with key findings, recommendations, and consolidated decisions."
 
 Present key findings to user. Update STATE.md.
+
+---
+
+## Step 4.5: Spike & Sketch (optional)
+
+**Skip this step unless one of these is true:**
+- `config.spike` is `true`
+- SPEC contains design-heavy keywords ("explore", "variants", "directions", "options", "sketch", "prototype", "iterate")
+- `$ARGUMENTS` explicitly says "spike", "sketch", or "explore three takes on …"
+
+**Goal:** Run 2-3 parallel micro-experiments so the user picks a direction before the roadmap locks in.
+
+**Read `references/spike-phase.md` for the full procedure.** Outline:
+
+1. Identify 2-3 dimensions worth exploring (UI layout, data shape, flow, tech choice).
+2. Spawn parallel spike agents. Each writes a sketch artifact to `.planning/spikes/NN-<slug>.html` (UI) or `.md` (architecture/data) plus `NN-<slug>-NOTES.md`.
+3. Present variants via AskUserQuestion (single-select). User picks one, asks for more, or rejects all.
+4. Lock the chosen direction in SPEC.md `## Locked Decisions` and `## Design Direction`. Roadmapper picks it up automatically.
+5. Archive non-chosen spikes (don't delete — useful for retrospectives).
+
+**If --auto:** Run spikes only if `config.spike: true`. Auto-pick the spike whose NOTES.md flags "what works" highest count and "what would be hard" lowest count. Log the choice.
 
 ---
 
@@ -243,110 +274,17 @@ For each phase in the roadmap, run this loop. After each phase completes, update
 
 **Goal:** Capture implementation decisions for THIS phase so planning agents never have to guess.
 
-**1. Load prior context:**
-Read ALL prior CONTEXT.md files from completed phases. Extract locked decisions. Build internal `<prior_decisions>` context. Don't re-ask what's already decided.
+**Read `references/discuss-phase.md` for the full procedure.** Outline:
 
-**2. Scout codebase:**
-If `.planning/CODEBASE.md` exists, read relevant sections. Otherwise, do targeted grep for terms related to the phase goal. Identify:
-- Reusable assets (components, hooks, utilities)
-- Established patterns (state management, styling, data fetching)
-- Integration points (where new code connects)
-
-**3. Identify gray areas:**
-Based on the phase goal, domain, prior decisions, and code context, generate 3-4 specific ambiguities that would change the implementation. NOT generic categories — concrete decisions for THIS phase.
-
-Annotate each with context:
-- Code: "You already have a Card component with shadow/rounded variants"
-- Prior decisions: "You chose infinite scroll in Phase 2 — same here or different?"
-
-**4. Present gray areas** via AskUserQuestion (multiSelect):
-"Which areas do you want to discuss for [phase name]?"
-User picks which to explore. Do NOT include a "skip all" option — they ran this to discuss.
-
-**If --auto:** Auto-select ALL areas, auto-choose recommended option for each question. Log each choice.
-
-**5. Discuss each area:**
-For each selected area, ask 2-4 targeted questions via AskUserQuestion:
-- Options should be concrete, not abstract ("Cards" not "Option A")
-- Annotate with code context ("reuses existing Card component — consistent with Messages")
-- Include "You decide" when reasonable (captures Claude discretion)
-- Each answer should inform the next question — follow the thread
-
-**6. Track canonical refs:**
-When the user references a doc, spec, or ADR during any answer ("check the MCP spec", "read adr-014", "per browse-spec.md"):
-- Read the referenced doc (or confirm it exists)
-- Add it to a running `canonical_refs` list with full file path
-- These user-referenced docs feed into CONTEXT.md for downstream agents — they're often the most important context
-
-**7. Checkpoint after each area:**
-After each gray area is fully discussed, write a checkpoint:
-`.planning/phases/NN-name/NN-DISCUSS-CHECKPOINT.json`
-
-```json
-{
-  "phase": "N",
-  "areas_completed": ["Area 1", "Area 2"],
-  "areas_remaining": ["Area 3"],
-  "decisions": { "Area 1": [{"question": "...", "answer": "..."}] },
-  "canonical_refs": ["path/to/spec.md"],
-  "deferred_ideas": ["..."]
-}
-```
-
-This enables session resume if interrupted.
-
-**8. After all areas:** Summarize decisions, ask "Ready to create context, or explore more gray areas?"
-
-**9. Write CONTEXT.md:**
-`.planning/phases/NN-name/NN-CONTEXT.md`
-
-```markdown
-# Phase [X]: [Name] — Context
-
-**Gathered:** [date]
-
-## Phase Boundary
-[What this phase delivers — scope anchor]
-
-## Implementation Decisions
-### [Category]
-- **D-01:** [Locked decision — non-negotiable downstream]
-- **D-02:** [Another locked decision]
-
-### Claude's Discretion
-[Areas where user deferred — Claude has flexibility]
-
-## Canonical References
-**Downstream agents MUST read these before planning or implementing.**
-- `path/to/spec.md` — [What it decides that's relevant]
-- `path/to/adr.md` — [What this doc defines]
-
-## Existing Code Insights
-### Reusable Assets
-- [Component/hook]: [How it applies]
-### Established Patterns
-- [Pattern]: [Constraint/enabler]
-### Integration Points
-- [Where new code connects]
-
-## Deferred Ideas
-[Scope creep caught and parked]
-```
-
-**10. Write DISCUSSION-LOG.md** (audit trail, not consumed by agents):
-`.planning/phases/NN-name/NN-DISCUSSION-LOG.md`
-
-For each area: options presented, what was chosen, user's notes. This is for the user to review later, not for agents.
-
-**11. Clean up checkpoint** — CONTEXT.md is now canonical.
-
-**12. Navigation:**
-```
-Context captured for Phase [N].
-
-Next: /clear then /build (resumes at Phase [N] planning)
-Or: continue in this session to plan.
-```
+1. Load prior context via `gsd-tools init phase <N>` (returns prior CONTEXT paths + locked decisions).
+2. Scout codebase (read `.planning/CODEBASE.md` or targeted grep).
+3. Identify 3-4 concrete gray areas for THIS phase.
+4. Present via AskUserQuestion (multiSelect). With `--auto`, select all + recommended options.
+5. Discuss each area (2-4 questions, concrete options, annotate with code context).
+6. Track canonical refs whenever user cites a doc.
+7. Checkpoint per area to `NN-DISCUSS-CHECKPOINT.json` for session resume.
+8. Summarize, write `NN-CONTEXT.md` (canonical) + `NN-DISCUSSION-LOG.md` (audit trail).
+9. Clean up checkpoint, navigate to plan phase.
 
 ### 6b. Plan Phase
 
@@ -365,14 +303,9 @@ Create plans for Phase [N]:
 - Group plans into waves by dependency (Wave 1 runs in parallel, Wave 2 waits for Wave 1)
 - Write plans to `.planning/phases/NN-name/NN-PP-PLAN.md`"
 
-**Plan-check** (if enabled in config): Spawn a **plan-checker agent** (read `references/plan-checker.md`):
-- Requirement coverage: every REQ-ID for this phase has tasks
-- Task completeness: every task has files + action + verify + done
-- Dependency correctness: no cycles, no missing references
-- Key links: artifacts wired together, not just created
-- Scope sanity: 2-3 tasks per plan, reasonable file counts
+**Plan-check** (if enabled in config): Spawn a **plan-checker agent** using the canonical prompt at `references/plan-checker-prompt.md`. The checker runs five verification dimensions (requirement coverage, task completeness, dependency correctness, key links, scope sanity) and returns a structured PASS/FAIL/NEEDS-REVISION report.
 
-If checker finds gaps → feed report back to planner, re-spawn. Max 3 iterations. After 3, present remaining issues to user.
+If `Overall: NEEDS REVISION` → feed the checker's report back to the planner verbatim, re-run planner, re-run checker. Max 3 iterations. After 3, present remaining issues to user.
 
 Present plan summary. Ask for approval (approve / request changes).
 
@@ -403,10 +336,12 @@ For each task:
 
 After all tasks: write `.planning/phases/NN-name/NN-PP-SUMMARY.md` listing what you built, deviations from plan, files changed, and notes for next phase."
 
-After each agent completes, read SUMMARY.md:
-- Deviations → flag significant ones to user
-- Blockers → surface for user decision
-- Notes → carry forward to next phase
+After each agent completes, read SUMMARY.md (frontmatter + Deviations section only — don't pull the body into orchestrator context):
+
+- **Significant deviations** (Rule 1 bug fixes affecting multiple files, Rule 3 plan-vs-reality mismatches that changed scope) → present to user via AskUserQuestion: "Continue / Roll back this plan / Split deviation into next phase". Don't silently absorb structural changes.
+- **Minor deviations** (single-file Rule 1 fixes, Rule 5 gold-plate avoidance) → log only, don't interrupt.
+- **Blockers** → surface immediately for user decision; don't proceed to next wave.
+- **Notes for next phase** → carry forward into the next phase's CONTEXT.md `## Specific Ideas` section.
 
 Update STATE.md after each wave completes.
 
@@ -427,9 +362,11 @@ Run `/verify` or perform inline:
 
 4. Write `.planning/phases/NN-name/NN-VERIFICATION.md`
 
-5. If FAILEDs: present with specific fix plan. Offer to remediate. If user agrees, spawn fix agents and re-verify.
+5. If FAILEDs: enter the **gap-closure loop**. Spawn one fix agent per FAILED truth (parallel), each with the specific gap and the artifact paths it must reach. After fix agents complete, re-verify. If still FAILED after 2 rounds, stop and present remaining gaps to user with `gaps_found: <count>` in VERIFICATION.md frontmatter — don't loop forever.
 
 6. If all VERIFIED: phase complete. Update STATE.md. Mark REQ-IDs as verified in ROADMAP.md traceability.
+
+7. **Deferred-ideas carousel** (milestone boundary): run `node ~/.claude/gsd/gsd-tools.js --build <slug> phase deferred` to scan all CONTEXT.md files. If `count > 0`, present the top 3-5 ideas via AskUserQuestion: **promote to next phase** / **keep deferred** / **drop**. Update the relevant CONTEXT.md `## Deferred Ideas` sections accordingly. Skip if count is 0.
 
 **Navigation after phase completes:**
 ```
@@ -468,9 +405,9 @@ The main conversation is the **orchestrator**. It routes and coordinates — it 
 - Never modify SPEC.md without asking. It's the user's vision document.
 - Every v1 requirement must have a REQ-ID and map to exactly one roadmap phase.
 - Plan-checker runs before execution (unless user opted out). Don't burn tokens on a bad plan.
-- Atomic commits per task during execution.
-- Scope creep → park it in deferred ideas, redirect to current phase boundary.
 - Always present explicit next steps with /clear recommendation between heavy phases.
+
+(Execution-time rules — atomic commits, scope-creep parking, deviation handling — live in `references/execution-rules.md` and apply to executor agents, not the orchestrator.)
 
 ## Input
 

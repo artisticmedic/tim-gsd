@@ -59,6 +59,16 @@ function parseYamlSubset(yamlText) {
         }
       } else if (currentKey && indent > currentIndent) {
         // Nested key — store as dot notation
+        if (indent > 2) {
+          // Only 1-level nesting is supported. Warn instead of silently
+          // collapsing parent.child.grandchild into parent.grandchild.
+          process.stderr.write(
+            `[gsd-tools] frontmatter: ignoring nested key '${key}' at indent ${indent} ` +
+            `(parser only supports 1-level nesting under '${currentKey}'). ` +
+            `Move complex structure to body, not frontmatter.\n`
+          );
+          continue;
+        }
         if (typeof result[currentKey] !== 'object' || Array.isArray(result[currentKey])) {
           result[currentKey] = {};
         }

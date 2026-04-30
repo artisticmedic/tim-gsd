@@ -153,7 +153,18 @@ Dependency-ordered phases mapped to requirements with success criteria.
 
 Located at `.planning/phases/NN-name/NN-CONTEXT.md`. Captures decisions so downstream agents never guess.
 
+YAML frontmatter holds the machine-readable index (canonical_refs, confidence scores, deferred_ideas count). The body holds the prose context.
+
 ```markdown
+---
+phase: NN
+canonical_refs:
+  - path/to/spec.md
+  - path/to/adr-014.md
+confidence_avg: 4.2
+deferred_count: 3
+---
+
 # Phase [X]: [Name] — Context
 
 **Gathered:** [date]

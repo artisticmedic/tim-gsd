@@ -6,16 +6,24 @@ const path = require('path');
 
 // ---------- Paths ----------
 
-function planningDir(cwd = process.cwd()) {
+function buildsDir(cwd = process.cwd()) {
+  return path.join(cwd, '.planning', 'builds');
+}
+
+function planningDir(cwd = process.cwd(), buildName = null) {
+  if (buildName) {
+    return path.join(buildsDir(cwd), generateSlug(buildName));
+  }
+  // Legacy flat layout fallback
   return path.join(cwd, '.planning');
 }
 
-function phasesDir(cwd = process.cwd()) {
-  return path.join(planningDir(cwd), 'phases');
+function phasesDir(cwd = process.cwd(), buildName = null) {
+  return path.join(planningDir(cwd, buildName), 'phases');
 }
 
-function planningPaths(cwd = process.cwd()) {
-  const root = planningDir(cwd);
+function planningPaths(cwd = process.cwd(), buildName = null) {
+  const root = planningDir(cwd, buildName);
   return {
     root,
     spec: path.join(root, 'SPEC.md'),
@@ -27,6 +35,47 @@ function planningPaths(cwd = process.cwd()) {
     codebase: path.join(root, 'CODEBASE.md'),
     phases: path.join(root, 'phases'),
   };
+}
+
+// List all named builds in .planning/builds/
+function listBuilds(cwd = process.cwd()) {
+  const bDir = buildsDir(cwd);
+  if (!dirExists(bDir)) return [];
+  try {
+    return fs.readdirSync(bDir)
+      .filter(e => {
+        try { return fs.statSync(path.join(bDir, e)).isDirectory(); } catch { return false; }
+      })
+      .map(slug => {
+        const statePath = path.join(bDir, slug, 'STATE.md');
+        const content = readFile(statePath);
+        let name = slug;
+        if (content) {
+          const match = content.match(/\*\*Build:\*\*\s*(.+)/);
+          if (match) name = match[1].trim();
+        }
+        return { slug, name, dir: path.join(bDir, slug) };
+      });
+  } catch { return []; }
+}
+
+// Resolve which build to use. Returns the build slug.
+// If buildName given → use it. If only one build exists → auto-select. If multiple → error with list.
+function resolveBuild(cwd, buildName) {
+  if (buildName) return generateSlug(buildName);
+
+  // Check for legacy flat layout
+  const legacyState = path.join(cwd, '.planning', 'STATE.md');
+  const hasLegacy = fileExists(legacyState) && !dirExists(buildsDir(cwd));
+  if (hasLegacy) return null; // Signal legacy mode
+
+  const builds = listBuilds(cwd);
+  if (builds.length === 0) return null;
+  if (builds.length === 1) return builds[0].slug;
+
+  // Multiple builds — can't auto-select
+  const list = builds.map(b => `  - ${b.slug} ("${b.name}")`).join('\n');
+  throw new Error(`Multiple builds found. Use --build <name> to select:\n${list}`);
 }
 
 // ---------- Slug generation ----------
@@ -97,9 +146,12 @@ function errorJson(msg, details = {}) {
 }
 
 module.exports = {
+  buildsDir,
   planningDir,
   phasesDir,
   planningPaths,
+  listBuilds,
+  resolveBuild,
   generateSlug,
   padPhase,
   timestamp,

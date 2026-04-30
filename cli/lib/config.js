@@ -12,10 +12,11 @@ const DEFAULTS = {
   execution: 'parallel',          // parallel | sequential
   commit_planning_docs: false,
   context_window_tokens: 200000,
+  spike: false,                   // run Step 4.5 spike phase between Research and Roadmap
 };
 
-function load(cwd) {
-  const configPath = planningPaths(cwd).config;
+function load(cwd, build = null) {
+  const configPath = planningPaths(cwd, build).config;
   const content = readFile(configPath);
   if (content === null) return { exists: false, config: { ...DEFAULTS } };
 
@@ -27,25 +28,25 @@ function load(cwd) {
   }
 }
 
-function save(cwd, config) {
-  const paths = planningPaths(cwd);
+function save(cwd, config, build = null) {
+  const paths = planningPaths(cwd, build);
   ensureDir(paths.root);
   writeFile(paths.config, JSON.stringify(config, null, 2) + '\n');
   return { success: true, path: paths.config };
 }
 
-function init(cwd, overrides = {}) {
-  const paths = planningPaths(cwd);
+function init(cwd, overrides = {}, build = null) {
+  const paths = planningPaths(cwd, build);
   if (fileExists(paths.config)) {
     return { success: false, error: 'config.json already exists' };
   }
   const config = { ...DEFAULTS, ...overrides };
-  return save(cwd, config);
+  return save(cwd, config, build);
 }
 
 // Get a value by dot-notation key
-function get(cwd, key) {
-  const { config } = load(cwd);
+function get(cwd, key, build = null) {
+  const { config } = load(cwd, build);
   if (!key) return config;
 
   const parts = key.split('.');
@@ -58,8 +59,8 @@ function get(cwd, key) {
 }
 
 // Set a value by dot-notation key
-function set(cwd, key, value) {
-  const { exists, config, error } = load(cwd);
+function set(cwd, key, value, build = null) {
+  const { exists, config, error } = load(cwd, build);
   if (error) return { success: false, error };
 
   // Parse value: try JSON first (handles booleans, numbers, arrays), fall back to string
@@ -80,7 +81,7 @@ function set(cwd, key, value) {
   }
   target[parts[parts.length - 1]] = parsed;
 
-  return save(cwd, config);
+  return save(cwd, config, build);
 }
 
 module.exports = {

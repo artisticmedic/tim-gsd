@@ -8,8 +8,8 @@ const path = require('path');
 const { planningPaths, phasesDir, padPhase, generateSlug, readFile, ensureDir, dirExists, fileExists } = require('./util');
 
 // Find phase directory by number. Returns null if not found.
-function findDir(cwd, phaseNum) {
-  const pDir = phasesDir(cwd);
+function findDir(cwd, phaseNum, build = null) {
+  const pDir = phasesDir(cwd, build);
   if (!dirExists(pDir)) return null;
 
   const padded = padPhase(phaseNum);
@@ -23,10 +23,10 @@ function findDir(cwd, phaseNum) {
 }
 
 // Create a phase directory with given number and name
-function createDir(cwd, phaseNum, phaseName) {
+function createDir(cwd, phaseNum, phaseName, build = null) {
   const padded = padPhase(phaseNum);
   const slug = generateSlug(phaseName);
-  const dir = path.join(phasesDir(cwd), `${padded}-${slug}`);
+  const dir = path.join(phasesDir(cwd, build), `${padded}-${slug}`);
 
   if (dirExists(dir)) {
     return { success: false, error: 'Phase directory already exists', path: dir };
@@ -37,8 +37,8 @@ function createDir(cwd, phaseNum, phaseName) {
 }
 
 // Inspect a phase directory and return status of its artifacts
-function status(cwd, phaseNum) {
-  const dir = findDir(cwd, phaseNum);
+function status(cwd, phaseNum, build = null) {
+  const dir = findDir(cwd, phaseNum, build);
   if (!dir) {
     return { found: false, phase: phaseNum };
   }
@@ -77,8 +77,8 @@ function status(cwd, phaseNum) {
 }
 
 // List all phases by scanning the phases directory
-function list(cwd) {
-  const pDir = phasesDir(cwd);
+function list(cwd, build = null) {
+  const pDir = phasesDir(cwd, build);
   if (!dirExists(pDir)) return [];
 
   let entries = [];
@@ -102,8 +102,8 @@ function list(cwd) {
 }
 
 // Parse ROADMAP.md to extract phase info
-function parseRoadmap(cwd) {
-  const roadmapPath = planningPaths(cwd).roadmap;
+function parseRoadmap(cwd, build = null) {
+  const roadmapPath = planningPaths(cwd, build).roadmap;
   const content = readFile(roadmapPath);
   if (content === null) return { exists: false, phases: [] };
 
@@ -129,10 +129,47 @@ function parseRoadmap(cwd) {
   return { exists: true, phases, content };
 }
 
+// Scan all phase CONTEXT.md files for deferred ideas. Returns flat list with
+// per-idea phase context so the orchestrator can present a milestone-boundary
+// carousel without re-reading every file in main context.
+function gatherDeferredIdeas(cwd, build = null) {
+  const phases = list(cwd, build);
+  const ideas = [];
+
+  for (const p of phases) {
+    const contextPath = path.join(cwd, p.dir, `${p.padded}-CONTEXT.md`);
+    const content = readFile(contextPath);
+    if (content === null) continue;
+
+    // Extract the "## Deferred Ideas" section body until the next H2 or EOF.
+    const sectionMatch = content.match(/##\s+Deferred Ideas\s*\n([\s\S]*?)(?=\n##\s|\n*$)/);
+    if (!sectionMatch) continue;
+
+    const body = sectionMatch[1].trim();
+    if (!body) continue;
+
+    // Split on bullet lines. Tolerant of "- ", "* ", or numbered.
+    const bullets = body.split('\n')
+      .map(l => l.replace(/^\s*[-*\d.]+\s+/, '').trim())
+      .filter(l => l.length > 0);
+
+    for (const idea of bullets) {
+      ideas.push({
+        phase: p.number,
+        phase_slug: p.slug,
+        idea,
+      });
+    }
+  }
+
+  return { count: ideas.length, ideas };
+}
+
 module.exports = {
   findDir,
   createDir,
   status,
   list,
   parseRoadmap,
+  gatherDeferredIdeas,
 };

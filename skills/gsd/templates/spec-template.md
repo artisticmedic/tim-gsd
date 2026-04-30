@@ -15,6 +15,10 @@
 - Density: 
 - Key interactions: 
 
+## Canonical References
+**Downstream agents MUST read these before planning or implementing.** User-cited docs that anchor decisions for this build (specs, ADRs, prior CONTEXT.md, external docs).
+- [path or URL] — [What it decides that's relevant]
+
 ## Technical Decisions
 [Stack, integrations, data sources, constraints]
 

@@ -18,8 +18,8 @@
 const { planningPaths, readFile, writeFile, timestamp, ensureDir, fileExists } = require('./util');
 
 // Read STATE.md and extract structured fields
-function load(cwd) {
-  const statePath = planningPaths(cwd).state;
+function load(cwd, build = null) {
+  const statePath = planningPaths(cwd, build).state;
   const content = readFile(statePath);
   if (content === null) {
     return { exists: false, path: statePath };
@@ -44,8 +44,8 @@ function extractField(content, fieldName) {
 }
 
 // Update a bold field in STATE.md
-function setField(cwd, fieldName, value) {
-  const statePath = planningPaths(cwd).state;
+function setField(cwd, fieldName, value, build = null) {
+  const statePath = planningPaths(cwd, build).state;
   let content = readFile(statePath);
   if (content === null) {
     return { success: false, error: 'STATE.md does not exist — call state init first' };
@@ -64,12 +64,12 @@ function setField(cwd, fieldName, value) {
 }
 
 // Initialize a new STATE.md with given project name
-function init(cwd, projectName) {
-  const paths = planningPaths(cwd);
+function init(cwd, projectName, buildSlug = null, force = false) {
+  const paths = planningPaths(cwd, buildSlug);
   ensureDir(paths.root);
 
-  if (fileExists(paths.state)) {
-    return { success: false, error: 'STATE.md already exists', path: paths.state };
+  if (fileExists(paths.state) && !force) {
+    return { success: false, error: `Build "${buildSlug || 'default'}" already exists. Use --force to overwrite.`, path: paths.state, build: buildSlug };
   }
 
   const now = timestamp();
@@ -105,12 +105,12 @@ function init(cwd, projectName) {
 `;
 
   writeFile(paths.state, template);
-  return { success: true, path: paths.state };
+  return { success: true, path: paths.state, build: buildSlug };
 }
 
 // Update the Progress table row for a given phase
-function updatePhaseProgress(cwd, phaseNum, step, status) {
-  const statePath = planningPaths(cwd).state;
+function updatePhaseProgress(cwd, phaseNum, step, status, build = null) {
+  const statePath = planningPaths(cwd, build).state;
   let content = readFile(statePath);
   if (content === null) {
     return { success: false, error: 'STATE.md not found' };
@@ -161,8 +161,8 @@ function updatePhaseProgress(cwd, phaseNum, step, status) {
 }
 
 // Append a decision to the Decisions Log
-function addDecision(cwd, decisionId, text) {
-  const statePath = planningPaths(cwd).state;
+function addDecision(cwd, decisionId, text, build = null) {
+  const statePath = planningPaths(cwd, build).state;
   let content = readFile(statePath);
   if (content === null) {
     return { success: false, error: 'STATE.md not found' };

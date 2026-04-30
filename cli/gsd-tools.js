@@ -17,9 +17,26 @@ const util = require('./lib/util');
 const { outputJson, errorJson } = util;
 const CWD = process.cwd();
 
+// ---------- Parse global flags ----------
+
+const rawArgs = process.argv.slice(2);
+
+// Extract --build <name> and --force before command routing
+let BUILD_NAME = null;
+let FORCE = false;
+const args = [];
+for (let i = 0; i < rawArgs.length; i++) {
+  if (rawArgs[i] === '--build' && i + 1 < rawArgs.length) {
+    BUILD_NAME = rawArgs[++i];
+  } else if (rawArgs[i] === '--force') {
+    FORCE = true;
+  } else {
+    args.push(rawArgs[i]);
+  }
+}
+
 // ---------- Command router ----------
 
-const args = process.argv.slice(2);
 if (args.length === 0) {
   printHelp();
   process.exit(0);
@@ -46,6 +63,9 @@ try {
     case 'frontmatter':
       handleFrontmatter(rest);
       break;
+    case 'builds':
+      handleBuilds(rest);
+      break;
     case 'init':
       handleInit(rest);
       break;
@@ -68,31 +88,38 @@ function handleState(args) {
   const [sub, ...rest] = args;
   switch (sub) {
     case 'load':
-    case 'get':
-      outputJson(state.load(CWD));
+    case 'get': {
+      const build = util.resolveBuild(CWD, BUILD_NAME);
+      outputJson(state.load(CWD, build));
       break;
+    }
     case 'init': {
       const projectName = rest.join(' ');
       if (!projectName) errorJson('state init requires a project name');
-      outputJson(state.init(CWD, projectName));
+      // Build slug derived from project name, or explicit --build
+      const buildSlug = BUILD_NAME ? util.generateSlug(BUILD_NAME) : util.generateSlug(projectName);
+      outputJson(state.init(CWD, projectName, buildSlug, FORCE));
       break;
     }
     case 'set-field': {
       const [field, ...valueParts] = rest;
       if (!field || valueParts.length === 0) errorJson('state set-field requires field name and value');
-      outputJson(state.setField(CWD, field, valueParts.join(' ')));
+      const build = util.resolveBuild(CWD, BUILD_NAME);
+      outputJson(state.setField(CWD, field, valueParts.join(' '), build));
       break;
     }
     case 'update-progress': {
       const [phaseNum, step, status] = rest;
       if (!phaseNum || !step || !status) errorJson('state update-progress requires: <phase> <step> <status>');
-      outputJson(state.updatePhaseProgress(CWD, phaseNum, step, status));
+      const build = util.resolveBuild(CWD, BUILD_NAME);
+      outputJson(state.updatePhaseProgress(CWD, phaseNum, step, status, build));
       break;
     }
     case 'add-decision': {
       const [decisionId, ...textParts] = rest;
       if (!decisionId || textParts.length === 0) errorJson('state add-decision requires: <decision-id> <text>');
-      outputJson(state.addDecision(CWD, decisionId, textParts.join(' ')));
+      const build = util.resolveBuild(CWD, BUILD_NAME);
+      outputJson(state.addDecision(CWD, decisionId, textParts.join(' '), build));
       break;
     }
     default:
@@ -102,22 +129,23 @@ function handleState(args) {
 
 function handleConfig(args) {
   const [sub, ...rest] = args;
+  const build = (sub !== 'init') ? util.resolveBuild(CWD, BUILD_NAME) : (BUILD_NAME ? util.generateSlug(BUILD_NAME) : null);
   switch (sub) {
     case 'load':
     case 'get':
       if (rest[0]) {
-        outputJson({ key: rest[0], value: config.get(CWD, rest[0]) });
+        outputJson({ key: rest[0], value: config.get(CWD, rest[0], build) });
       } else {
-        outputJson(config.load(CWD));
+        outputJson(config.load(CWD, build));
       }
       break;
     case 'init':
-      outputJson(config.init(CWD));
+      outputJson(config.init(CWD, {}, build));
       break;
     case 'set': {
       const [key, ...valueParts] = rest;
       if (!key || valueParts.length === 0) errorJson('config set requires: <key> <value>');
-      outputJson(config.set(CWD, key, valueParts.join(' ')));
+      outputJson(config.set(CWD, key, valueParts.join(' '), build));
       break;
     }
     default:
@@ -127,34 +155,38 @@ function handleConfig(args) {
 
 function handlePhase(args) {
   const [sub, ...rest] = args;
+  const build = util.resolveBuild(CWD, BUILD_NAME);
   switch (sub) {
     case 'list':
-      outputJson({ phases: phase.list(CWD) });
+      outputJson({ phases: phase.list(CWD, build) });
       break;
     case 'find': {
       const [num] = rest;
       if (!num) errorJson('phase find requires a phase number');
-      const dir = phase.findDir(CWD, num);
+      const dir = phase.findDir(CWD, num, build);
       outputJson({ found: !!dir, phase: num, dir });
       break;
     }
     case 'status': {
       const [num] = rest;
       if (!num) errorJson('phase status requires a phase number');
-      outputJson(phase.status(CWD, num));
+      outputJson(phase.status(CWD, num, build));
       break;
     }
     case 'create': {
       const [num, ...nameParts] = rest;
       if (!num || nameParts.length === 0) errorJson('phase create requires: <number> <name>');
-      outputJson(phase.createDir(CWD, num, nameParts.join(' ')));
+      outputJson(phase.createDir(CWD, num, nameParts.join(' '), build));
       break;
     }
     case 'roadmap':
-      outputJson(phase.parseRoadmap(CWD));
+      outputJson(phase.parseRoadmap(CWD, build));
+      break;
+    case 'deferred':
+      outputJson(phase.gatherDeferredIdeas(CWD, build));
       break;
     default:
-      errorJson(`Unknown phase subcommand: ${sub}. Use: list | find | status | create | roadmap`);
+      errorJson(`Unknown phase subcommand: ${sub}. Use: list | find | status | create | roadmap | deferred`);
   }
 }
 
@@ -184,17 +216,36 @@ function handleFrontmatter(args) {
 // Compound init query — answers "what's the state of the project?" in one call.
 // This is the highest-value command. The /gsd skill calls this at the start
 // of each phase to get everything it needs without multiple file reads.
+function handleBuilds(args) {
+  const [sub] = args;
+  switch (sub) {
+    case 'list':
+    case undefined: {
+      const builds = util.listBuilds(CWD);
+      // Also check for legacy flat layout
+      const legacyState = require('path').join(CWD, '.planning', 'STATE.md');
+      const hasLegacy = util.fileExists(legacyState) && !util.dirExists(util.buildsDir(CWD));
+      outputJson({ builds, has_legacy: hasLegacy, count: builds.length });
+      break;
+    }
+    default:
+      errorJson(`Unknown builds subcommand: ${sub}. Use: list`);
+  }
+}
+
 function handleInit(args) {
   const [mode, phaseArg] = args;
+  const build = util.resolveBuild(CWD, BUILD_NAME);
 
-  const statePaths = util.planningPaths(CWD);
-  const cfg = config.load(CWD);
-  const stateInfo = state.load(CWD);
-  const roadmap = phase.parseRoadmap(CWD);
+  const statePaths = util.planningPaths(CWD, build);
+  const cfg = config.load(CWD, build);
+  const stateInfo = state.load(CWD, build);
+  const roadmap = phase.parseRoadmap(CWD, build);
 
   const result = {
     project_root: CWD,
     mode: mode || 'overview',
+    build: build || '(legacy)',
     timestamp: util.timestamp(),
     planning_exists: util.dirExists(statePaths.root),
     artifacts: {
@@ -213,18 +264,19 @@ function handleInit(args) {
       last_updated: stateInfo.last_updated,
     } : null,
     roadmap_phases: roadmap.phases.length,
+    all_builds: util.listBuilds(CWD),
   };
 
   // Phase-specific init: include phase details
   if (mode === 'phase' && phaseArg) {
-    result.phase = phase.status(CWD, phaseArg);
+    result.phase = phase.status(CWD, phaseArg, build);
 
     // Get prior phases (completed phases before this one)
     const phaseNum = parseInt(phaseArg, 10);
-    result.prior_phases = phase.list(CWD)
+    result.prior_phases = phase.list(CWD, build)
       .filter(p => p.number < phaseNum)
       .map(p => {
-        const s = phase.status(CWD, p.number);
+        const s = phase.status(CWD, p.number, build);
         return {
           number: p.number,
           name: p.slug,
@@ -261,11 +313,19 @@ function printHelp() {
 gsd-tools — CLI helper for the /gsd skill
 
 USAGE
-  node gsd-tools.js <command> [subcommand] [args...]
+  node gsd-tools.js [--build <name>] <command> [subcommand] [args...]
+
+GLOBAL FLAGS
+  --build <name>    Select a named build (stored in .planning/builds/<slug>/)
+                    Auto-selects if only one build exists. Required when multiple exist.
+  --force           Allow overwriting existing builds (used with state init)
+
+BUILDS
+  builds list                             List all named builds in .planning/builds/
 
 STATE OPERATIONS
   state load                              Load STATE.md as structured JSON
-  state init <project-name>               Create a new STATE.md
+  state init <project-name>               Create a new build (auto-slugs from name)
   state set-field <field> <value>         Update a field in STATE.md
   state update-progress <phase> <step> <status>   Update progress table row
                                           step: discuss | plan | execute | verify
@@ -290,7 +350,7 @@ FRONTMATTER OPERATIONS
   frontmatter set <file> <key> <value>    Update a frontmatter field
 
 INIT (compound query)
-  init overview                           Full project state snapshot
+  init overview                           Full project state snapshot (includes all builds)
   init phase <number>                     Phase-specific state + prior phases + requirements
 
 UTILITIES
@@ -303,12 +363,11 @@ OUTPUT
   Expected to be called from the /gsd skill, but safe to run manually.
 
 EXAMPLES
-  node gsd-tools.js init overview
-  node gsd-tools.js init phase 2
-  node gsd-tools.js state init "My Project"
-  node gsd-tools.js config set granularity coarse
-  node gsd-tools.js phase create 1 "Auth Foundation"
-  node gsd-tools.js slug "Content Management System"
+  node gsd-tools.js state init "Dashboard Harmonization"
+  node gsd-tools.js --build dashboard-harmonization init overview
+  node gsd-tools.js --build account-health config set granularity coarse
+  node gsd-tools.js builds list
+  node gsd-tools.js state init "New Project" --force
 `;
   process.stdout.write(help);
 }
