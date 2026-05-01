@@ -23,33 +23,35 @@ Invoke when the user says: "build", "let's build", "I want to build", "spec this
 
 ## CLI helper tool
 
-A Node.js CLI at `~/.claude/gsd/gsd-tools.js` handles deterministic state operations reliably. Pure stdlib, zero dependencies, auditable. Use it for STATE.md and config.json reads/writes instead of parsing markdown inline.
+A Node.js CLI shipped with this plugin (run as `gsd-tools` — it's added to PATH automatically when the plugin is enabled) handles deterministic state operations reliably. Pure stdlib, zero dependencies, auditable. Use it for STATE.md and config.json reads/writes instead of parsing markdown inline.
 
 **Named builds:** Multiple builds can coexist in `.planning/builds/<slug>/`. Each build is isolated — its own STATE.md, config.json, phases/, etc. Use `--build <name>` to target a specific build. If only one build exists, it auto-selects.
+
+**Planning root resolution:** Reads walk upward from cwd looking for a directory containing `.planning/`. If your build repo lives one level below the planning root (a recommended pattern that keeps planning artifacts out of public repos), you can run `gsd-tools` from inside the build repo and it will find the planning dir in an ancestor. The CLI prints a one-line `Note:` to stderr whenever the resolved root differs from cwd, and `Wrote <path>` after every write — if you ever stop seeing those, the run isn't touching what you think it is. When no `.planning/` exists in any ancestor, `builds list` exits non-zero rather than returning an empty array silently. Pass `--quiet` to suppress the breadcrumbs in scripts.
 
 **Common calls:**
 ```bash
 # List all builds
-node ~/.claude/gsd/gsd-tools.js builds list
+gsd-tools builds list
 
 # Initialize a new build (creates .planning/builds/<slug>/)
-node ~/.claude/gsd/gsd-tools.js state init "Project Name"
-node ~/.claude/gsd/gsd-tools.js --build project-name config init
+gsd-tools state init "Project Name"
+gsd-tools --build project-name config init
 
 # Compound state query — use this at the start of each phase
-node ~/.claude/gsd/gsd-tools.js --build project-name init phase <N>
+gsd-tools --build project-name init phase <N>
 
 # Update progress
-node ~/.claude/gsd/gsd-tools.js --build project-name state update-progress <N> <step> <status>
+gsd-tools --build project-name state update-progress <N> <step> <status>
 
 # Create phase directory
-node ~/.claude/gsd/gsd-tools.js --build project-name phase create <N> "<name>"
+gsd-tools --build project-name phase create <N> "<name>"
 
 # Config management
-node ~/.claude/gsd/gsd-tools.js --build project-name config set granularity coarse
+gsd-tools --build project-name config set granularity coarse
 ```
 
-Run `node ~/.claude/gsd/gsd-tools.js help` for the full command list.
+Run `gsd-tools help` for the full command list.
 
 **When to use the CLI vs inline operations:**
 - State transitions, config changes, phase directory creation → always use the CLI (reliable, atomic writes)
@@ -67,7 +69,7 @@ Run `node ~/.claude/gsd/gsd-tools.js help` for the full command list.
 
 ### Resume detection
 
-Run `node ~/.claude/gsd/gsd-tools.js init overview` and act on the JSON. It returns existing builds, current phase, and any interrupted discussion checkpoints.
+Run `gsd-tools init overview` and act on the JSON. It returns existing builds, current phase, and any interrupted discussion checkpoints.
 
 - Zero builds → fresh start. Run `state init "Name"` to create `.planning/builds/<slug>/`.
 - One build → "Found build: [name], currently at [phase]. Resume or start fresh?"
@@ -134,7 +136,7 @@ After writing:
 
 ## Step 2: Config
 
-**If `--auto` is set:** skip the questions. Run `node ~/.claude/gsd/gsd-tools.js --build <slug> config init` — it writes the DEFAULTS (standard granularity, parallel execution, research+plan-check+verification all on). Proceed to research.
+**If `--auto` is set:** skip the questions. Run `gsd-tools --build <slug> config init` — it writes the DEFAULTS (standard granularity, parallel execution, research+plan-check+verification all on). Proceed to research.
 
 **Otherwise**, ask workflow preferences via AskUserQuestion (2 rounds):
 
@@ -366,7 +368,7 @@ Run `/verify` or perform inline:
 
 6. If all VERIFIED: phase complete. Update STATE.md. Mark REQ-IDs as verified in ROADMAP.md traceability.
 
-7. **Deferred-ideas carousel** (milestone boundary): run `node ~/.claude/gsd/gsd-tools.js --build <slug> phase deferred` to scan all CONTEXT.md files. If `count > 0`, present the top 3-5 ideas via AskUserQuestion: **promote to next phase** / **keep deferred** / **drop**. Update the relevant CONTEXT.md `## Deferred Ideas` sections accordingly. Skip if count is 0.
+7. **Deferred-ideas carousel** (milestone boundary): run `gsd-tools --build <slug> phase deferred` to scan all CONTEXT.md files. If `count > 0`, present the top 3-5 ideas via AskUserQuestion: **promote to next phase** / **keep deferred** / **drop**. Update the relevant CONTEXT.md `## Deferred Ideas` sections accordingly. Skip if count is 0.
 
 **Navigation after phase completes:**
 ```

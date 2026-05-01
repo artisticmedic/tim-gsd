@@ -1,6 +1,6 @@
 # gsd-tools
 
-CLI helper for the `/gsd` skill. Handles deterministic operations that shouldn't be left to markdown parsing in Claude prompts.
+CLI helper for the `gsd` skill. Handles deterministic operations that shouldn't be left to markdown parsing in Claude prompts.
 
 ## Design
 
@@ -12,8 +12,16 @@ CLI helper for the `/gsd` skill. Handles deterministic operations that shouldn't
 
 ## Usage
 
+When installed as a Claude Code plugin, the wrapper at `bin/gsd-tools` is on `$PATH`:
+
 ```bash
-node ~/.claude/gsd/gsd-tools.js <command> [args...]
+gsd-tools <command> [args...]
+```
+
+For direct invocation outside the plugin context:
+
+```bash
+node cli/gsd-tools.js <command> [args...]
 ```
 
 Run with no args to see the full command list.
@@ -21,7 +29,7 @@ Run with no args to see the full command list.
 ## Files
 
 ```
-~/.claude/gsd/
+cli/
 ├── gsd-tools.js          # Entry point and command router
 ├── lib/
 │   ├── util.js           # Paths, slugs, timestamps, file I/O
@@ -49,17 +57,25 @@ Run with no args to see the full command list.
 
 ## Called by
 
-The `/gsd` skill at `~/.claude/skills/gsd/SKILL.md`. The skill invokes commands via Bash:
+The `gsd` skill at `skills/gsd/SKILL.md`. The skill invokes commands via Bash:
 
 ```bash
-INIT=$(node ~/.claude/gsd/gsd-tools.js init phase 2)
+INIT=$(gsd-tools init phase 2)
 ```
 
 ## Testing manually
 
 ```bash
-# In any directory with .planning/
-node ~/.claude/gsd/gsd-tools.js init overview
-node ~/.claude/gsd/gsd-tools.js phase list
-node ~/.claude/gsd/gsd-tools.js state load
+# In any directory at or below a .planning/ root
+gsd-tools init overview
+gsd-tools phase list
+gsd-tools state load
+```
+
+## Tests
+
+The regression suite for the cwd-resolution bug (see `skills/gsd/bugs/`) lives at `tests/cwd-resolution.test.js`. Run with:
+
+```bash
+node --test tests/cwd-resolution.test.js
 ```

@@ -1,0 +1,27 @@
+#!/bin/bash
+# gsd-tools — wrapper that locates the CLI relative to this script.
+#
+# Works in three contexts:
+#   1. Plugin install: bin/ on PATH; CLI at $PLUGIN_ROOT/cli/gsd-tools.js
+#   2. Local --plugin-dir: same layout
+#   3. Direct invocation: ./bin/gsd-tools
+#
+# CLAUDE_PLUGIN_ROOT is preferred when set (canonical plugin install location).
+# Otherwise we resolve from BASH_SOURCE, following symlinks.
+
+set -e
+
+if [ -n "$CLAUDE_PLUGIN_ROOT" ] && [ -f "$CLAUDE_PLUGIN_ROOT/cli/gsd-tools.js" ]; then
+  exec node "$CLAUDE_PLUGIN_ROOT/cli/gsd-tools.js" "$@"
+fi
+
+SOURCE="${BASH_SOURCE[0]:-$0}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+PLUGIN_ROOT="$(dirname "$SCRIPT_DIR")"
+
+exec node "$PLUGIN_ROOT/cli/gsd-tools.js" "$@"
