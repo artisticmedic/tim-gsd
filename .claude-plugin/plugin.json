@@ -1,0 +1,11 @@
+{
+  "name": "get-stuff-done",
+  "description": "Structured build pipeline — interview, spec, roadmap, per-phase plan+execute, goal-backward verify. Trigger on \"build\", \"let's build\", \"spec this\", \"scope this\", \"new feature\". Supports --auto, --chain.",
+  "author": {
+    "name": "Tim Gailey"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/artisticmedic/tim-gsd",
+  "repository": "https://github.com/artisticmedic/tim-gsd",
+  "keywords": ["productivity", "planning", "build-pipeline", "spec", "roadmap", "ai-workflow", "design-shaped"]
+}

@@ -4,7 +4,7 @@
 // Pure Node, zero dependencies. Auditable in one pass.
 // Each invocation runs, outputs JSON, exits. No daemons, no servers.
 //
-// Usage: node gsd-tools.js <command> [subcommand] [args...]
+// Usage: gsd-tools <command> [subcommand] [args...]
 //
 // Run with no args to see the full command list.
 
@@ -15,24 +15,42 @@ const frontmatter = require('./lib/frontmatter');
 const util = require('./lib/util');
 
 const { outputJson, errorJson } = util;
-const CWD = process.cwd();
+const PROCESS_CWD = process.cwd();
 
 // ---------- Parse global flags ----------
 
 const rawArgs = process.argv.slice(2);
 
-// Extract --build <name> and --force before command routing
+// Extract --build <name>, --force, --quiet before command routing
 let BUILD_NAME = null;
 let FORCE = false;
+let QUIET = false;
 const args = [];
 for (let i = 0; i < rawArgs.length; i++) {
   if (rawArgs[i] === '--build' && i + 1 < rawArgs.length) {
     BUILD_NAME = rawArgs[++i];
   } else if (rawArgs[i] === '--force') {
     FORCE = true;
+  } else if (rawArgs[i] === '--quiet') {
+    QUIET = true;
   } else {
     args.push(rawArgs[i]);
   }
+}
+
+// ---------- Resolve planning root (walk upward) ----------
+// CWD is the *effective* working directory for planning operations: it is the
+// process cwd when a `.planning/` lives there directly, otherwise the nearest
+// ancestor that has one. This lets callers run the CLI from inside a build
+// repo whose planning artifacts are kept one level up (a documented pattern).
+//
+// `state init` and `config init` are the exceptions — they CREATE a planning
+// dir, so when no ancestor is found they must use the process cwd verbatim.
+const RESOLVED_PLANNING_ROOT = util.findPlanningRoot(PROCESS_CWD);
+const CWD = RESOLVED_PLANNING_ROOT || PROCESS_CWD;
+
+if (RESOLVED_PLANNING_ROOT && RESOLVED_PLANNING_ROOT !== PROCESS_CWD && !QUIET) {
+  process.stderr.write(`Note: gsd-tools resolved planning root to ${RESOLVED_PLANNING_ROOT} (cwd ${PROCESS_CWD})\n`);
 }
 
 // ---------- Command router ----------
@@ -96,34 +114,57 @@ function handleState(args) {
     case 'init': {
       const projectName = rest.join(' ');
       if (!projectName) errorJson('state init requires a project name');
-      // Build slug derived from project name, or explicit --build
+      // state init creates planning artifacts. If no ancestor `.planning/` was
+      // found, anchor to the process cwd (don't accidentally create one in
+      // an unrelated parent). If an ancestor was found, use it.
+      const initRoot = RESOLVED_PLANNING_ROOT || PROCESS_CWD;
       const buildSlug = BUILD_NAME ? util.generateSlug(BUILD_NAME) : util.generateSlug(projectName);
-      outputJson(state.init(CWD, projectName, buildSlug, FORCE));
+      const result = state.init(initRoot, projectName, buildSlug, FORCE);
+      if (result.success && !QUIET) {
+        process.stderr.write(`Wrote ${result.path}\n`);
+      }
+      outputJson(result);
       break;
     }
     case 'set-field': {
       const [field, ...valueParts] = rest;
       if (!field || valueParts.length === 0) errorJson('state set-field requires field name and value');
       const build = util.resolveBuild(CWD, BUILD_NAME);
-      outputJson(state.setField(CWD, field, valueParts.join(' '), build));
+      const result = state.setField(CWD, field, valueParts.join(' '), build);
+      announceWrite(result, util.planningPaths(CWD, build).state);
+      outputJson(result);
       break;
     }
     case 'update-progress': {
       const [phaseNum, step, status] = rest;
       if (!phaseNum || !step || !status) errorJson('state update-progress requires: <phase> <step> <status>');
       const build = util.resolveBuild(CWD, BUILD_NAME);
-      outputJson(state.updatePhaseProgress(CWD, phaseNum, step, status, build));
+      const result = state.updatePhaseProgress(CWD, phaseNum, step, status, build);
+      announceWrite(result, util.planningPaths(CWD, build).state);
+      outputJson(result);
       break;
     }
     case 'add-decision': {
       const [decisionId, ...textParts] = rest;
       if (!decisionId || textParts.length === 0) errorJson('state add-decision requires: <decision-id> <text>');
       const build = util.resolveBuild(CWD, BUILD_NAME);
-      outputJson(state.addDecision(CWD, decisionId, textParts.join(' '), build));
+      const result = state.addDecision(CWD, decisionId, textParts.join(' '), build);
+      announceWrite(result, util.planningPaths(CWD, build).state);
+      outputJson(result);
       break;
     }
     default:
       errorJson(`Unknown state subcommand: ${sub}. Use: load | init | set-field | update-progress | add-decision`);
+  }
+}
+
+// Print the resolved write target on stderr so operators see *where* a write
+// landed — the cwd-mismatch bug this guards against was invisible precisely
+// because writes appeared to succeed.
+function announceWrite(result, resolvedPath) {
+  if (QUIET) return;
+  if (result && result.success) {
+    process.stderr.write(`Wrote ${resolvedPath}\n`);
   }
 }
 
@@ -139,13 +180,22 @@ function handleConfig(args) {
         outputJson(config.load(CWD, build));
       }
       break;
-    case 'init':
-      outputJson(config.init(CWD, {}, build));
+    case 'init': {
+      // Like state init: anchor to process cwd if there is no ancestor planning dir.
+      const initRoot = RESOLVED_PLANNING_ROOT || PROCESS_CWD;
+      const result = config.init(initRoot, {}, build);
+      if (result && result.success && result.path && !QUIET) {
+        process.stderr.write(`Wrote ${result.path}\n`);
+      }
+      outputJson(result);
       break;
+    }
     case 'set': {
       const [key, ...valueParts] = rest;
       if (!key || valueParts.length === 0) errorJson('config set requires: <key> <value>');
-      outputJson(config.set(CWD, key, valueParts.join(' '), build));
+      const result = config.set(CWD, key, valueParts.join(' '), build);
+      announceWrite(result, util.planningPaths(CWD, build).config);
+      outputJson(result);
       break;
     }
     default:
@@ -222,10 +272,26 @@ function handleBuilds(args) {
     case 'list':
     case undefined: {
       const builds = util.listBuilds(CWD);
-      // Also check for legacy flat layout
       const legacyState = require('path').join(CWD, '.planning', 'STATE.md');
       const hasLegacy = util.fileExists(legacyState) && !util.dirExists(util.buildsDir(CWD));
-      outputJson({ builds, has_legacy: hasLegacy, count: builds.length });
+
+      // Loud failure: no planning root anywhere up the tree AND no builds AND no legacy.
+      // Silent empty arrays are how cwd-mismatch bugs hide.
+      if (!RESOLVED_PLANNING_ROOT && builds.length === 0 && !hasLegacy) {
+        errorJson(
+          `No .planning/ found at or above ${PROCESS_CWD}. ` +
+          `Walked from cwd to filesystem root and saw no .planning/builds/ or legacy .planning/STATE.md. ` +
+          `Run 'state init "<project>"' from the directory that should own planning artifacts, or cd to one.`,
+          { searched_from: PROCESS_CWD, resolved: null }
+        );
+      }
+
+      outputJson({
+        builds,
+        has_legacy: hasLegacy,
+        count: builds.length,
+        planning_root: RESOLVED_PLANNING_ROOT || PROCESS_CWD,
+      });
       break;
     }
     default:
@@ -313,12 +379,24 @@ function printHelp() {
 gsd-tools — CLI helper for the /gsd skill
 
 USAGE
-  node gsd-tools.js [--build <name>] <command> [subcommand] [args...]
+  gsd-tools [--build <name>] <command> [subcommand] [args...]
 
 GLOBAL FLAGS
   --build <name>    Select a named build (stored in .planning/builds/<slug>/)
                     Auto-selects if only one build exists. Required when multiple exist.
   --force           Allow overwriting existing builds (used with state init)
+  --quiet           Suppress stderr breadcrumbs (resolved-path notes, write confirmations)
+
+PLANNING ROOT RESOLUTION
+  Reads walk upward from cwd looking for a directory containing .planning/
+  (with builds/ or legacy STATE.md). When found in an ancestor, gsd-tools
+  uses it and prints a one-line note to stderr. When no .planning/ is found
+  anywhere up the tree, 'builds list' and reads exit non-zero rather than
+  silently returning empty results.
+
+  Writes that CREATE planning artifacts (state init, config init) anchor to
+  the process cwd when no ancestor exists, and to the discovered ancestor
+  when one does.
 
 BUILDS
   builds list                             List all named builds in .planning/builds/
@@ -363,11 +441,11 @@ OUTPUT
   Expected to be called from the /gsd skill, but safe to run manually.
 
 EXAMPLES
-  node gsd-tools.js state init "Dashboard Harmonization"
-  node gsd-tools.js --build dashboard-harmonization init overview
-  node gsd-tools.js --build account-health config set granularity coarse
-  node gsd-tools.js builds list
-  node gsd-tools.js state init "New Project" --force
+  gsd-tools state init "Dashboard Harmonization"
+  gsd-tools --build dashboard-harmonization init overview
+  gsd-tools --build account-health config set granularity coarse
+  gsd-tools builds list
+  gsd-tools state init "New Project" --force
 `;
   process.stdout.write(help);
 }

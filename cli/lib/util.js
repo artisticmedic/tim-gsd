@@ -6,6 +6,31 @@ const path = require('path');
 
 // ---------- Paths ----------
 
+// Walk upward from startDir looking for a directory that contains a usable
+// `.planning/` (either `.planning/builds/` or a legacy `.planning/STATE.md`).
+// Returns the containing directory (the one with `.planning/` as a child),
+// or null if nothing is found before the filesystem root.
+//
+// This makes the CLI cwd-tolerant: callers can run from inside a build repo
+// whose `.planning/` lives in an ancestor (a documented pattern — keeps
+// planning artifacts out of the public repo).
+function findPlanningRoot(startDir) {
+  let dir = path.resolve(startDir);
+  while (true) {
+    const planning = path.join(dir, '.planning');
+    if (dirExists(planning)) {
+      const builds = path.join(planning, 'builds');
+      const legacyState = path.join(planning, 'STATE.md');
+      if (dirExists(builds) || fileExists(legacyState)) {
+        return dir;
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
 function buildsDir(cwd = process.cwd()) {
   return path.join(cwd, '.planning', 'builds');
 }
@@ -152,6 +177,7 @@ module.exports = {
   planningPaths,
   listBuilds,
   resolveBuild,
+  findPlanningRoot,
   generateSlug,
   padPhase,
   timestamp,

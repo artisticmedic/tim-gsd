@@ -6,7 +6,7 @@ Capture implementation decisions for THIS phase so planning agents never have to
 
 Run the CLI to get prior phases + locked decisions in one call:
 ```bash
-node ~/.claude/gsd/gsd-tools.js --build <slug> init phase <N>
+gsd-tools --build <slug> init phase <N>
 ```
 The JSON returns `prior_phases`, `current_phase`, and the paths of every CONTEXT.md that's already been written. Read what's relevant; don't re-ask what's already decided.
 
