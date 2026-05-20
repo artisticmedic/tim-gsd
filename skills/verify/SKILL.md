@@ -1,5 +1,6 @@
 ---
 description: Goal-backward verification — checks whether build outcomes actually exist and work in the codebase. Use when the user says "verify", "check the build", "did it work", "verify the spec", "does it actually work", "check outcomes", "goal check", or after completing a /build pipeline. Also usable standalone after any manual work session.
+disable-model-invocation: true
 allowed-tools: Read, Glob, Grep, Bash, Write, Agent
 argument-hint: [spec file path — or blank to auto-detect .planning/SPEC.md]
 ---
