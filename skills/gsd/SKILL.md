@@ -1,5 +1,6 @@
 ---
 description: Structured build pipeline — interview, spec, roadmap, per-phase plan+execute, goal-backward verify. Trigger on /gsd, "build", "let's build", "spec this", "scope this", "new feature", "plan and build". Supports --auto, --chain.
+disable-model-invocation: true
 allowed-tools: Read, Bash, Glob, Grep, Agent, AskUserQuestion
 argument-hint: [idea or description] [--auto] [--chain]
 ---
